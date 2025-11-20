@@ -1,21 +1,25 @@
 // src/context/AuthContext.tsx
 import React, { createContext, useState, useEffect, useContext, ReactNode } from "react";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "../app/services/firebase";
+// ⚠️ Changement : Utilisation de onSnapshot pour le temps réel
+import { doc, onSnapshot } from "firebase/firestore"; 
+// ⚠️ Correction du chemin d'importation
+import { db, initializeAuthPersistence, auth } from "../services/firebaseConfig"; 
 
-interface UserData {
+// Définition du type pour les données de profil (ajusté pour être plus précis)
+interface UserProfile {
   uid: string;
   email: string;
   name?: string;
+  avatarUrl?: string; // Ajouté pour cohérence avec le composant Profile
   university?: string;
   subjects?: string[];
-  createdAt?: Date;
+  createdAt?: string; // Stocké comme string dans Firestore
 }
 
 interface AuthContextType {
   user: User | null;
-  userData: UserData | null;
+  userProfile: UserProfile | null; // Renommé pour clarté
   logout: () => Promise<void>;
   loading: boolean;
 }
@@ -28,31 +32,91 @@ export const useAuth = () => {
   return context;
 };
 
+
+// ... (UserProfile et AuthContextType)
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [userData, setUserData] = useState<UserData | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // écoute les changements de connexion Firebase
+  
+  // 1. Listener Firebase Auth (pour l'état de connexion)
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        setUser(firebaseUser);
-        const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-        if (userDoc.exists()) setUserData(userDoc.data() as UserData);
-      } else {
-        setUser(null);
-        setUserData(null);
+    let authUnsubscribe: () => void;
+    let isMounted = true;
+
+    const setupAuth = async () => {
+      try {
+        // 🚀 ÉTAPE CRUCIALE : Attendre la configuration de la persistance
+        await initializeAuthPersistence();
+
+        // Récupérer l'instance d'auth initialisée
+        const authInstance = auth();
+
+        // Mettre en place le listener SEULEMENT après la persistance
+        if (isMounted && authInstance) {
+          authUnsubscribe = onAuthStateChanged(authInstance, (firebaseUser) => {
+            setUser(firebaseUser);
+          });
+        }
+      } catch (error) {
+        console.error("Erreur fatale lors de l'initialisation de l'Auth:", error);
+        if (isMounted) setLoading(false); // Arrêter le chargement en cas d'erreur
       }
+    };
+
+    setupAuth();
+
+    return () => {
+      isMounted = false;
+      if (authUnsubscribe) authUnsubscribe();
+    };
+  }, []); // S'exécute une seule fois au montage
+
+  // 2. Listener Firestore (pour les données de profil en temps réel)
+  useEffect(() => {
+    if (!user) {
+      setUserProfile(null);
+      setLoading(false); // ⚠️ AJOUT : Définir loading à false si l'utilisateur est déconnecté
+      return;
+    }
+
+    const profileRef = doc(db, "users", user.uid);
+    
+    const profileUnsubscribe = onSnapshot(profileRef, (docSnap) => {
+      if (docSnap.exists()) {
+        // ... (votre logique de fusion de données)
+        const profileData = docSnap.data() as Omit<UserProfile, 'uid' | 'email'>;
+        setUserProfile({
+          uid: user.uid,
+          email: user.email || '',
+          ...profileData,
+        });
+      } else {
+        // ... (votre logique de profil par défaut)
+        setUserProfile({
+          uid: user.uid,
+          email: user.email || '',
+          name: user.displayName || undefined,
+        });
+      }
+      setLoading(false); // ⚠️ DÉFINIR loading à false après avoir chargé le profil
+    }, (error) => {
+      console.error("Erreur lors de la récupération du profil Firestore:", error);
       setLoading(false);
     });
-    return unsubscribe;
-  }, []);
 
-  const logout = async () => await signOut(auth);
+    return () => profileUnsubscribe();
+  }, [user]); // Déclenché à chaque changement d'utilisateur
+
+  const logout = async () => {
+    const a = auth();
+    if (!a) return console.error('Auth not initialized');
+    await signOut(a);
+  };
 
   return (
-    <AuthContext.Provider value={{ user, userData, logout, loading }}>
+    <AuthContext.Provider value={{ user, userProfile, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );
