@@ -1,122 +1,112 @@
-// src/context/AuthContext.tsx
-import React, { createContext, useState, useEffect, useContext, ReactNode } from "react";
-import { onAuthStateChanged, signOut, User } from "firebase/auth";
-// ⚠️ Changement : Utilisation de onSnapshot pour le temps réel
-import { doc, onSnapshot } from "firebase/firestore"; 
-// ⚠️ Correction du chemin d'importation
-import { db, initializeAuthPersistence, auth } from "../services/firebaseConfig"; 
-
-// Définition du type pour les données de profil (ajusté pour être plus précis)
-interface UserProfile {
-  uid: string;
-  email: string;
-  name?: string;
-  avatarUrl?: string; // Ajouté pour cohérence avec le composant Profile
-  university?: string;
-  subjects?: string[];
-  createdAt?: string; // Stocké comme string dans Firestore
-}
+import React, { createContext, useState, useEffect, useContext, ReactNode } from 'react';
+import { AuthService, AuthUser } from '../services/authService';
 
 interface AuthContextType {
-  user: User | null;
-  userProfile: UserProfile | null; // Renommé pour clarté
-  logout: () => Promise<void>;
+  user: AuthUser | null;
   loading: boolean;
+  isSignedIn: boolean;
+  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string, name?: string) => Promise<{ error: string | null }>;
+  signOut: () => Promise<{ error: string | null }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) throw new Error("useAuth must be used within AuthProvider");
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
   return context;
 };
 
-
-// ... (UserProfile et AuthContextType)
-
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
-  
-  // 1. Listener Firebase Auth (pour l'état de connexion)
+
   useEffect(() => {
-    let authUnsubscribe: () => void;
     let isMounted = true;
 
-    const setupAuth = async () => {
+    const checkAuth = async () => {
       try {
-        // 🚀 ÉTAPE CRUCIALE : Attendre la configuration de la persistance
-        await initializeAuthPersistence();
-
-        // Récupérer l'instance d'auth initialisée
-        const authInstance = auth();
-
-        // Mettre en place le listener SEULEMENT après la persistance
-        if (isMounted && authInstance) {
-          authUnsubscribe = onAuthStateChanged(authInstance, (firebaseUser) => {
-            setUser(firebaseUser);
-          });
+        const { user } = await AuthService.getCurrentUser();
+        if (isMounted) {
+          setUser(user);
         }
       } catch (error) {
-        console.error("Erreur fatale lors de l'initialisation de l'Auth:", error);
-        if (isMounted) setLoading(false); // Arrêter le chargement en cas d'erreur
+        console.error('Error checking auth:', error);
+        if (isMounted) {
+          setUser(null);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
-    setupAuth();
+    checkAuth();
+
+    const unsubscribe = AuthService.onAuthStateChange((currentUser) => {
+      if (isMounted) {
+        setUser(currentUser);
+        setLoading(false);
+      }
+    });
 
     return () => {
       isMounted = false;
-      if (authUnsubscribe) authUnsubscribe();
+      unsubscribe?.data?.subscription?.unsubscribe?.();
     };
-  }, []); // S'exécute une seule fois au montage
+  }, []);
 
-  // 2. Listener Firestore (pour les données de profil en temps réel)
-  useEffect(() => {
-    if (!user) {
-      setUserProfile(null);
-      setLoading(false); // ⚠️ AJOUT : Définir loading à false si l'utilisateur est déconnecté
-      return;
-    }
-
-    const profileRef = doc(db, "users", user.uid);
-    
-    const profileUnsubscribe = onSnapshot(profileRef, (docSnap) => {
-      if (docSnap.exists()) {
-        // ... (votre logique de fusion de données)
-        const profileData = docSnap.data() as Omit<UserProfile, 'uid' | 'email'>;
-        setUserProfile({
-          uid: user.uid,
-          email: user.email || '',
-          ...profileData,
-        });
-      } else {
-        // ... (votre logique de profil par défaut)
-        setUserProfile({
-          uid: user.uid,
-          email: user.email || '',
-          name: user.displayName || undefined,
-        });
+  const signIn = async (email: string, password: string) => {
+    try {
+      const { user: authUser, error } = await AuthService.signIn(email, password);
+      if (error) {
+        return { error };
       }
-      setLoading(false); // ⚠️ DÉFINIR loading à false après avoir chargé le profil
-    }, (error) => {
-      console.error("Erreur lors de la récupération du profil Firestore:", error);
-      setLoading(false);
-    });
+      if (authUser) {
+        setUser(authUser);
+        return { error: null };
+      }
+      return { error: 'Sign in failed' };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Sign in failed' };
+    }
+  };
 
-    return () => profileUnsubscribe();
-  }, [user]); // Déclenché à chaque changement d'utilisateur
+  const signUp = async (email: string, password: string, name?: string) => {
+    try {
+      const { user: authUser, error } = await AuthService.signUp(email, password, name);
+      if (error) {
+        return { error };
+      }
+      if (authUser) {
+        setUser(authUser);
+        return { error: null };
+      }
+      return { error: 'Sign up failed' };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Sign up failed' };
+    }
+  };
 
-  const logout = async () => {
-    const a = auth();
-    if (!a) return console.error('Auth not initialized');
-    await signOut(a);
+  const signOut = async () => {
+    try {
+      const { error } = await AuthService.signOut();
+      if (error) {
+        return { error };
+      }
+      setUser(null);
+      return { error: null };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Sign out failed' };
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, userProfile, logout, loading }}>
+    <AuthContext.Provider value={{ user, loading, isSignedIn: user !== null, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   );

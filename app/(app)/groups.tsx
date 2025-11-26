@@ -3,8 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { db } from "../../services/firebaseConfig";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { supabase } from '../../services/supabaseClient';
 import { useAuth } from "../../hooks/useAuth";
 
 interface Group {
@@ -17,7 +16,7 @@ interface Group {
 export default function GroupsScreen() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
-  
+
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -27,23 +26,16 @@ export default function GroupsScreen() {
       return;
     }
 
-    const groupsRef = collection(db, "groups");
-    const q = query(groupsRef, where("members", "array-contains", user.uid));
+    const loadGroups = async () => {
+      try {
+        setLoading(false);
+      } catch (error) {
+        console.error("Erreur lors de la récupération des groupes:", error);
+        setLoading(false);
+      }
+    };
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedGroups: Group[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Group[];
-      
-      setGroups(fetchedGroups);
-      setLoading(false);
-    }, (error) => {
-      console.error("Erreur lors de la récupération des groupes:", error);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    loadGroups();
   }, [user, authLoading]);
 
   const renderGroupItem = ({ item }: { item: Group }) => (

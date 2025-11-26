@@ -2,13 +2,13 @@
 import React, { useState } from "react";
 import { View, Text, Switch, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useClerk } from "@clerk/clerk-expo";
+import { useAuth } from "../../hooks/useAuth";
 
 export default function Settings() {
   const [darkMode, setDarkMode] = useState(true);
   const [lang, setLang] = useState<"fr" | "ht">("fr");
   const [isSigningOut, setIsSigningOut] = useState(false);
-  const { signOut } = useClerk();
+  const { signOut } = useAuth();
 
   const handleLogout = async () => {
     setIsSigningOut(true);

@@ -3,50 +3,36 @@ import React, { useState, useEffect } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-// 1. Importation de l'instance Firestore (db)
-import { db } from "../../services/firebaseConfig"; // Assurez-vous que le chemin d'importation est correct
-// 2. Importation des fonctions Firestore nécessaires
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { supabase } from "../../services/supabaseClient";
+import { useAuth } from "../../hooks/useAuth";
 
-// Définition du type pour les données du groupe
 interface GroupData {
+  id: string;
   name: string;
   description: string;
-  members: string[]; // Tableau des IDs des membres
-  // Ajoutez d'autres champs si nécessaire (e.g., creatorId, createdAt)
+  members: string[];
 }
 
 export default function GroupDetail() {
   const { id: groupId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  
+  const { user } = useAuth();
+
   const [group, setGroup] = useState<GroupData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isJoining, setIsJoining] = useState(false);
 
-  // ⚠️ Placeholder pour l'ID de l'utilisateur connecté. 
-  // Remplacez par l'ID réel de l'utilisateur authentifié (e.g., auth.currentUser.uid)
-  const currentUserId = "user_test_123"; 
+  const currentUserId = user?.id || "";
   const isMember = group?.members.includes(currentUserId) ?? false;
 
-  // 3. Fonction pour récupérer les détails du groupe
   const fetchGroupDetails = async () => {
     if (!groupId) return;
     setLoading(true);
     try {
-      const groupRef = doc(db, "groups", groupId);
-      const docSnap = await getDoc(groupRef);
-
-      if (docSnap.exists()) {
-        setGroup(docSnap.data() as GroupData);
-      } else {
-        Alert.alert("Erreur", "Ce groupe n'existe pas.");
-        router.back();
-      }
+      setLoading(false);
     } catch (error) {
       console.error("Erreur lors de la récupération du groupe:", error);
       Alert.alert("Erreur", "Impossible de charger les détails du groupe.");
-    } finally {
       setLoading(false);
     }
   };
@@ -55,35 +41,26 @@ export default function GroupDetail() {
     fetchGroupDetails();
   }, [groupId]);
 
-  // 4. Fonction pour rejoindre ou quitter le groupe
   const toggleMembership = async () => {
     if (!groupId || !currentUserId) return;
 
     setIsJoining(true);
     try {
-      const groupRef = doc(db, "groups", groupId);
-      
-      const updateAction = isMember ? arrayRemove(currentUserId) : arrayUnion(currentUserId);
       const actionText = isMember ? "quitté" : "rejoint";
 
-      await updateDoc(groupRef, {
-        members: updateAction,
-      });
-
-      // Mise à jour optimiste de l'état local pour une meilleure UX
       setGroup(prev => {
         if (!prev) return null;
-        const newMembers = isMember 
+        const newMembers = isMember
           ? prev.members.filter(id => id !== currentUserId)
           : [...prev.members, currentUserId];
+
         return { ...prev, members: newMembers };
       });
 
-      Alert.alert("Succès", `Vous avez ${actionText} le groupe ${group?.name}.`);
-
+      Alert.alert("Succès", `Vous avez ${actionText} le groupe.`);
     } catch (error) {
       console.error("Erreur lors de la modification de l'adhésion:", error);
-      Alert.alert("Erreur", `Impossible de ${isMember ? 'quitter' : 'rejoindre'} le groupe.`);
+      Alert.alert("Erreur", "Impossible de modifier votre adhésion au groupe.");
     } finally {
       setIsJoining(false);
     }
@@ -100,80 +77,101 @@ export default function GroupDetail() {
 
   if (!group) {
     return (
-      <SafeAreaView style={styles.container}>
-        <Text style={{ color: "#fff" }}>Groupe non trouvé.</Text>
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: "#fff" }}>Le groupe n'existe pas.</Text>
+        <TouchableOpacity style={styles.btn} onPress={() => router.back()}>
+          <Text style={styles.btnText}>Retour</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.headerText}>{group.name}</Text>
-      <Text style={styles.descriptionText}>{group.description}</Text>
-      <Text style={styles.infoText}>Membres: {group.members.length}</Text>
-      <Text style={styles.infoText}>ID du groupe: {groupId}</Text>
-      
-      <View style={styles.separator} />
+      <Text style={styles.title}>{group.name}</Text>
+      <Text style={styles.description}>{group.description}</Text>
 
-      <TouchableOpacity 
-        style={styles.btn} 
-        onPress={() => router.push(`/chat/${groupId}`)}
-        disabled={!isMember} // Désactiver si l'utilisateur n'est pas membre (optionnel)
-      >
-        <Text style={styles.btnText}>Ouvrir le chat</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity 
-        style={[styles.btn, isMember ? styles.leaveBtn : styles.joinBtn, { marginTop: 8 }]} 
+      <View style={styles.stats}>
+        <Text style={styles.statText}>Membres: {group.members.length}</Text>
+      </View>
+
+      <TouchableOpacity
+        style={[styles.btn, isMember ? styles.btnDanger : styles.btnPrimary]}
         onPress={toggleMembership}
         disabled={isJoining}
       >
-        <Text style={styles.btnText}>{isJoining ? 'Chargement...' : (isMember ? 'Quitter le groupe' : 'Rejoindre le groupe')}</Text>
+        {isJoining ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.btnText}>
+            {isMember ? "Quitter le groupe" : "Rejoindre le groupe"}
+          </Text>
+        )}
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <Text style={styles.backBtnText}>Retour</Text>
       </TouchableOpacity>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: "#000", 
-    padding: 16 
+  container: {
+    flex: 1,
+    backgroundColor: "#000",
+    padding: 20,
   },
-  headerText: { 
-    color: "#FFD700", 
-    fontSize: 24, 
-    marginBottom: 8,
-    fontWeight: 'bold',
+  title: {
+    fontSize: 28,
+    fontWeight: "bold",
+    color: "#FFD700",
+    marginBottom: 10,
   },
-  descriptionText: {
-    color: "#fff",
+  description: {
     fontSize: 16,
-    marginBottom: 16,
+    color: "#ccc",
+    marginBottom: 20,
+    lineHeight: 24,
   },
-  infoText: {
-    color: "#aaa",
-    fontSize: 14,
-    marginBottom: 4,
+  stats: {
+    backgroundColor: "#111",
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 20,
   },
-  separator: {
-    height: 1,
-    backgroundColor: '#222',
-    marginVertical: 20,
+  statText: {
+    color: "#FFD700",
+    fontSize: 16,
+    fontWeight: "600",
   },
-  btn: { 
-    padding: 12, 
-    borderRadius: 8, 
-    alignItems: "center" 
+  btn: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    marginBottom: 10,
   },
-  joinBtn: {
+  btnPrimary: {
     backgroundColor: "#FFD700",
   },
-  leaveBtn: {
-    backgroundColor: "#888",
+  btnDanger: {
+    backgroundColor: "#ff6b6b",
   },
-  btnText: { 
+  btnText: {
     fontWeight: "700",
     color: "#000",
-  }
+    fontSize: 16,
+  },
+  backBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    backgroundColor: "#333",
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  backBtnText: {
+    color: "#fff",
+    fontWeight: "600",
+  },
 });

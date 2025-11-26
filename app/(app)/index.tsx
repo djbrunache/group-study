@@ -13,7 +13,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.welcomeText}>Bienvenue{user?.displayName ? `, ${user.displayName}` : ''} !</Text>
+        <Text style={styles.welcomeText}>Bienvenue{user?.name ? `, ${user.name}` : ''} !</Text>
         <Text style={styles.subtitle}>Prêt à étudier en groupe ?</Text>
 
         <View style={styles.cardContainer}>

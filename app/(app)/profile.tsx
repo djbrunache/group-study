@@ -4,12 +4,10 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from "rea
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuth } from "../../hooks/useAuth";
-import { useClerk } from "@clerk/clerk-expo";
 
 export default function Profile() {
   const router = useRouter();
-  const { user, loading } = useAuth();
-  const { signOut } = useClerk();
+  const { user, loading, signOut } = useAuth();
   const [isSigningOut, setIsSigningOut] = React.useState(false);
 
   const handleLogout = async () => {
@@ -37,10 +35,10 @@ export default function Profile() {
       <Text style={styles.title}>Profil étudiant</Text>
       <View style={styles.avatarPlaceholder}>
         <Text style={styles.avatarText}>
-          {user?.displayName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || "U"}
+          {user?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || "U"}
         </Text>
       </View>
-      <Text style={styles.name}>{user?.displayName || "Utilisateur"}</Text>
+      <Text style={styles.name}>{user?.name || "Utilisateur"}</Text>
       <Text style={styles.info}>{user?.email || "Non disponible"}</Text>
 
       <TouchableOpacity style={styles.btn} onPress={() => router.push("/(app)/settings")}>

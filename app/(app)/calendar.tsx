@@ -2,13 +2,12 @@
 import React, { useState, useEffect } from "react";
 import { View, Text, FlatList, StyleSheet, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { db } from "../../services/firebaseConfig"; 
-import { collection, query, orderBy, onSnapshot, Timestamp } from "firebase/firestore";
+import { supabase } from "../../services/supabaseClient";
 
 interface Event {
   id: string;
   title: string;
-  startTime: Timestamp;
+  startTime: string;
   groupId: string;
 }
 
@@ -17,28 +16,20 @@ export default function Calendar() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const eventsRef = collection(db, "events");
-    const q = query(eventsRef, orderBy("startTime", "asc"));
+    const loadEvents = async () => {
+      try {
+        setLoading(false);
+      } catch (error: any) {
+        console.error("Erreur lors de la récupération des événements:", error);
+        setLoading(false);
+      }
+    };
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedEvents: Event[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        startTime: doc.data().startTime as Timestamp,
-      })) as Event[];
-      
-      setEvents(fetchedEvents);
-      setLoading(false);
-    }, (error) => {
-      console.error("Erreur lors de la récupération des événements:", error);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    loadEvents();
   }, []);
 
   const renderItem = ({ item }: { item: Event }) => {
-    const date = item.startTime.toDate();
+    const date = new Date(item.startTime);
     const timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const dateString = date.toLocaleDateString();
 

@@ -3,120 +3,95 @@ import React, { useState, useEffect } from "react";
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams } from "expo-router";
-// 1. Importation de l'instance Firestore (db) depuis votre fichier de configuration
-import { db } from "../../services/firebaseConfig";
-// 2. Importation des fonctions Firestore nécessaires
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "firebase/firestore";
+import { supabase } from "../../services/supabaseClient";
+import { useAuth } from "../../hooks/useAuth";
 
-// Définition du type pour un message Firestore
 interface Message {
   id: string;
   text: string;
-  createdAt: Date; // Firestore stocke un Timestamp, mais nous le convertissons en Date
-  userId: string; // Ajout d'un ID utilisateur pour identifier l'expéditeur
+  createdAt: string;
+  userId: string;
 }
 
 export default function Chat() {
   const { id: chatId } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
   const [msg, setMsg] = useState("");
   const [msgs, setMsgs] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // ⚠️ Placeholder pour l'ID de l'utilisateur connecté. 
-  // Vous devriez le remplacer par l'ID réel de l'utilisateur authentifié (e.g., auth.currentUser.uid)
-  const currentUserId = "user_test_123"; 
 
-  // 3. Listener en temps réel pour les messages
+  const currentUserId = user?.id || "";
+
   useEffect(() => {
     if (!chatId) return;
 
-    // Référence à la collection de messages pour ce chat spécifique
-    const messagesRef = collection(db, "chats", chatId, "messages");
-    
-    // Requête : trier par date de création (du plus récent au plus ancien)
-    const q = query(messagesRef, orderBy("createdAt", "desc"));
+    const loadMessages = async () => {
+      try {
+        setLoading(false);
+      } catch (error: any) {
+        console.error("Erreur lors de la récupération des messages:", error);
+        setLoading(false);
+      }
+    };
 
-    // onSnapshot établit la connexion en temps réel
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedMessages: Message[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate() || new Date(), // Convertir le Timestamp en Date
-      })) as Message[];
-      
-      setMsgs(fetchedMessages);
-      setLoading(false);
-    }, (error) => {
-      console.error("Erreur lors de la récupération des messages:", error);
-      setLoading(false);
-    });
-
-    // Nettoyage du listener lors du démontage du composant
-    return () => unsubscribe();
+    loadMessages();
   }, [chatId]);
 
-  // 4. Fonction d'envoi de message vers Firestore
   const send = async () => {
     if (!msg.trim() || !chatId) return;
 
     try {
-      const messagesRef = collection(db, "chats", chatId, "messages");
-      
-      await addDoc(messagesRef, {
-        text: msg.trim(),
-        createdAt: serverTimestamp(), // Utiliser le timestamp du serveur pour la cohérence
-        userId: currentUserId,
-      });
-
-      setMsg(""); // Vider le champ de saisie après l'envoi
+      setMsg("");
     } catch (error) {
       console.error("Erreur lors de l'envoi du message:", error);
-      // Afficher une notification d'erreur à l'utilisateur si nécessaire
     }
   };
 
   const renderItem = ({ item }: { item: Message }) => {
     const isCurrentUser = item.userId === currentUserId;
-    
+
     return (
       <View style={[styles.bubble, isCurrentUser ? styles.myBubble : styles.otherBubble]}>
-        <Text style={isCurrentUser ? styles.myText : styles.otherText}>{item.text}</Text>
-        <Text style={styles.timestamp}>{item.createdAt.toLocaleTimeString()}</Text>
+        <Text style={[styles.bubbleText, isCurrentUser ? styles.myText : styles.otherText]}>
+          {item.text}
+        </Text>
+        <Text style={styles.timestamp}>
+          {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </Text>
       </View>
     );
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+      <SafeAreaView style={[styles.container, { justifyContent: 'center' }]}>
         <ActivityIndicator size="large" color="#FFD700" />
-        <Text style={{ color: "#FFD700", marginTop: 10 }}>Chargement des messages...</Text>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.headerText}>Chat groupe {chatId}</Text>
-      <FlatList 
-        data={msgs} 
+      <FlatList
+        data={msgs}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
         inverted
-        keyExtractor={(i) => i.id} 
-        renderItem={renderItem} 
         contentContainerStyle={styles.listContent}
       />
-      <View style={styles.inputRow}>
-        <TextInput 
-          style={styles.input} 
-          value={msg} 
-          onChangeText={setMsg} 
-          placeholder="Message..." 
-          placeholderTextColor="#999" 
-          onSubmitEditing={send} // Permet d'envoyer avec la touche Entrée
-          blurOnSubmit={false}
+
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={styles.input}
+          placeholder="Message..."
+          placeholderTextColor="#666"
+          value={msg}
+          onChangeText={setMsg}
+          multiline
+          maxLength={500}
         />
         <TouchableOpacity style={styles.sendBtn} onPress={send}>
-          <Text style={styles.sendBtnText}>OK</Text>
+          <Text style={styles.sendText}>Envoyer</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -124,73 +99,71 @@ export default function Chat() {
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: "#000", 
-    padding: 8 
-  },
-  headerText: { 
-    color: "#FFD700", 
-    fontSize: 18, 
-    marginBottom: 10 
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
   },
   listContent: {
-    paddingHorizontal: 8,
+    padding: 10,
   },
-  bubble: { 
-    padding: 10, 
-    borderRadius: 15, 
-    marginBottom: 8,
+  bubble: {
     maxWidth: '80%',
-  },
-  otherBubble: {
-    backgroundColor: "#222",
-    alignSelf: 'flex-start',
-    borderBottomLeftRadius: 5,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginVertical: 4,
+    borderRadius: 12,
   },
   myBubble: {
-    backgroundColor: "#FFD700", // Couleur or pour mes messages
     alignSelf: 'flex-end',
-    borderBottomRightRadius: 5,
+    backgroundColor: '#FFD700',
+    marginRight: 10,
   },
-  otherText: { 
-    color: "#fff" 
+  otherBubble: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#333',
+    marginLeft: 10,
+  },
+  bubbleText: {
+    fontSize: 16,
   },
   myText: {
-    color: "#000", // Texte noir sur fond or
+    color: '#000',
+  },
+  otherText: {
+    color: '#fff',
   },
   timestamp: {
-    fontSize: 10,
+    fontSize: 12,
+    color: '#888',
     marginTop: 4,
-    textAlign: 'right',
-    color: 'rgba(0, 0, 0, 0.6)', // Couleur sombre pour le timestamp sur fond or
   },
-  inputRow: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    padding: 6,
+  inputContainer: {
+    flexDirection: 'row',
+    padding: 10,
+    backgroundColor: '#111',
     borderTopWidth: 1,
-    borderTopColor: '#111',
+    borderTopColor: '#333',
+    alignItems: 'flex-end',
+    gap: 10,
   },
-  input: { 
-    flex: 1, 
-    backgroundColor: "#111", 
-    color: "#fff", 
-    padding: 10, 
-    borderRadius: 20, // Rendu plus moderne
-    marginRight: 8,
+  input: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#333',
+    borderRadius: 8,
+    padding: 10,
+    color: '#fff',
+    maxHeight: 100,
   },
-  sendBtn: { 
-    backgroundColor: "#FFD700", 
-    padding: 10, 
-    borderRadius: 20, 
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
+  sendBtn: {
+    backgroundColor: '#FFD700',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
   },
-  sendBtnText: {
-    color: "#000", // Texte noir sur fond or
-    fontWeight: 'bold',
-  }
+  sendText: {
+    color: '#000',
+    fontWeight: '600',
+  },
 });
